@@ -33,13 +33,13 @@ npm run dev
 npm run build
 ```
 
-## 📦 Formato Web (Site)
+## 📦 Arquivo Único (Portátil)
 
-O projeto está configurado no formato web padrão, otimizado para carregamento rápido e cache eficiente.
+O projeto está configurado para gerar um **único arquivo HTML** que contém todo o CSS e JavaScript necessários. 
 
 1. Execute `npm run build`.
-2. A pasta `dist` conterá todos os arquivos necessários para hospedar o site de graça (em serviços como GitHub Pages, Vercel ou Netlify).
-3. O aplicativo também funciona como PWA, permitindo que os usuários o "instalem" no celular diretamente pelo navegador.
+2. O arquivo gerado em `dist/index.html` é tudo o que você precisa.
+3. Você pode enviar este arquivo por e-mail ou WhatsApp, e ele abrirá perfeitamente em qualquer navegador, mesmo sem internet (offline), mantendo todo o layout e funcionalidades.
 
 ## 📱 Como Gerar o APK (Android)
 
