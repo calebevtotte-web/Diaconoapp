@@ -33,6 +33,14 @@ npm run dev
 npm run build
 ```
 
+## 📦 Arquivo Único (Portátil)
+
+O projeto agora está configurado para gerar um **único arquivo HTML** que contém todo o CSS e JavaScript necessários. 
+
+1. Execute `npm run build`.
+2. O arquivo gerado em `dist/index.html` é tudo o que você precisa.
+3. Você pode enviar este arquivo por e-mail ou WhatsApp, e ele abrirá perfeitamente em qualquer navegador, mesmo sem internet (offline), mantendo todo o layout e funcionalidades.
+
 ## 📱 Como Gerar o APK (Android)
 
 Este projeto já está configurado com **Capacitor**. Para gerar o seu arquivo APK, siga estes passos no seu computador pessoal:
