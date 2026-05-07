@@ -7,16 +7,68 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, Calendar as CalendarIcon, LayoutDashboard, FileText, Settings as SettingsIcon,
   ChevronLeft, ChevronRight, Plus, Search, Trash2, Star, Share2, Copy, 
-  Check, AlertTriangle, Info, ArrowRightLeft, RefreshCw, UserPlus, Phone, MoreHorizontal, X
+  Check, AlertTriangle, Info, ArrowRightLeft, RefreshCw, UserPlus, Phone, MoreHorizontal, X,
+  Sparkles, MessageCircle, Heart, BarChart3, PieChart as PieChartIcon, TrendingUp
 } from 'lucide-react';
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, 
-  getDay, isToday, isSameMonth, parse, startOfWeek, endOfWeek
+  getDay, isToday, isSameMonth, parse, startOfWeek, endOfWeek, isAfter, subDays, startOfDay, endOfDay,
+  differenceInDays
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from '@google/genai';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, AreaChart, Area, Legend
+} from 'recharts';
 import { cn, DAYS_SHORT, DB_KEY } from './lib/utils';
-import { AppDB, Member, Scale, Settings } from './types';
+import { AppDB, Member, Scale, Settings, ServiceType, SERVICE_LABELS } from './types';
+
+// --- Helpers ---
+const isMemberAvailable = (member: Member, dateStr: string) => {
+  const dow = getDay(parse(dateStr, 'yyyy-MM-dd', new Date()));
+  const isDayOk = member.availableDays.length === 0 || member.availableDays.includes(dow);
+  const isDateOk = !member.unavailableDates?.includes(dateStr);
+  return isDayOk && isDateOk;
+};
+
+// --- AI Service ---
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+
+async function getAISmartSuggestion(db: AppDB, date: string, serviceType: ServiceType, qty: number) {
+  if (!ai) throw new Error('GEMINI_API_KEY não configurado');
+  
+  const availableMembers = db.members.filter(m => isMemberAvailable(m, date));
+  
+  const context = {
+    date,
+    serviceType: SERVICE_LABELS[serviceType],
+    qtyNeeded: qty,
+    members: availableMembers.map(m => ({
+      id: m.id,
+      name: m.name,
+      priority: m.flagged,
+      totalParticipations: db.scales.filter(s => s.members.includes(m.id)).length,
+      lastServed: db.scales.filter(s => s.members.includes(m.id)).sort((a,b) => b.date.localeCompare(a.date))[0]?.date || 'Nunca'
+    }))
+  };
+
+  const prompt = `Você é um assistente de gestão ministerial. Sua tarefa é sugerir ${qty} pessoas de uma lista de voluntários para servir no evento "${SERVICE_LABELS[serviceType]}" no dia ${date}. Retorne APENAS um array JSON contendo os IDs das ${qty} pessoas sugeridas. Exemplo: ["id1", "id2"]. Dados: ${JSON.stringify(context)}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+    });
+    const text = response.text || "[]";
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanText) as string[];
+  } catch (error) {
+    console.error('AI Suggestion Error:', error);
+    throw error;
+  }
+}
 
 // --- Default Data ---
 const DEFAULT_DB: AppDB = {
@@ -81,7 +133,7 @@ export default function App() {
 
       const dateStr = format(day, 'yyyy-MM-dd');
       const cfg = dowConfigs[dow];
-      const available = db.members.filter(m => m.availableDays.length === 0 || m.availableDays.includes(dow));
+      const available = db.members.filter(m => isMemberAvailable(m, dateStr));
       
       const scored = [...available].sort((a, b) => {
         const sa = (a.flagged ? -1000 : 0) + getScaleCount(a.id) + (pickCount[a.id] || 0) * 2;
@@ -143,6 +195,7 @@ export default function App() {
     const name = formData.get('name') as string;
     const phone = formData.get('phone') as string;
     const availableDays = Array.from(formData.getAll('days')).map(Number);
+    const unavailableDates = editingMember?.unavailableDates || [];
 
     if (!name.trim()) return showToast('Nome é obrigatório', 'error');
 
@@ -150,7 +203,7 @@ export default function App() {
       setDb(prev => ({
         ...prev,
         members: prev.members.map(m => m.id === editingMember.id ? {
-          ...m, name, phone, availableDays
+          ...m, name, phone, availableDays, unavailableDates
         } : m)
       }));
       showToast('Membro atualizado');
@@ -161,6 +214,7 @@ export default function App() {
         phone,
         flagged: false,
         availableDays,
+        unavailableDates,
         addedAt: Date.now()
       };
       setDb(prev => ({ ...prev, members: [...prev.members, newMember] }));
@@ -198,14 +252,25 @@ export default function App() {
     return db.scales.find(s => s.date === selectedDate) || null;
   }, [db.scales, selectedDate]);
 
-  const saveScale = (memberIds: string[], eventName: string) => {
+  const saveScale = (memberIds: string[], eventName: string, serviceType?: ServiceType) => {
     if (!selectedDate) return;
+
+    // Last line of defense: final validation
+    const invalidMember = memberIds.find(id => {
+      const m = db.members.find(x => x.id === id);
+      return m && !isMemberAvailable(m, selectedDate);
+    });
+
+    if (invalidMember) {
+      const m = db.members.find(x => x.id === invalidMember);
+      return showToast(`Impossível salvar: ${m?.name} possui impedimento nesta data.`, 'error');
+    }
     
     if (currentScale) {
       setDb(prev => ({
         ...prev,
         scales: prev.scales.map(s => s.date === selectedDate ? {
-          ...s, members: memberIds, event: eventName, updatedAt: Date.now()
+          ...s, members: memberIds, event: eventName, serviceType, updatedAt: Date.now()
         } : s)
       }));
     } else {
@@ -214,6 +279,7 @@ export default function App() {
         event: eventName,
         date: selectedDate,
         members: memberIds,
+        serviceType,
         swaps: [],
         createdAt: Date.now()
       };
@@ -234,8 +300,7 @@ export default function App() {
   };
 
   const suggestMembers = (dateStr: string, qty: number, randomize = false) => {
-    const dow = getDay(parse(dateStr, 'yyyy-MM-dd', new Date()));
-    const available = db.members.filter(m => m.availableDays.length === 0 || m.availableDays.includes(dow));
+    const available = db.members.filter(m => isMemberAvailable(m, dateStr));
 
     if (available.length === 0) return [];
 
@@ -304,6 +369,7 @@ export default function App() {
       {/* Mobile Navigation Bar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-[100] px-2 py-1 flex items-center justify-around shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
         <MobileNavBtn active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Início" />
+        <MobileNavBtn active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<Heart size={20} />} label="Saúde" />
         <MobileNavBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<CalendarIcon size={20} />} label="Escalas" />
         <MobileNavBtn active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={<Users size={20} />} label="Equipe" />
         <MobileNavBtn active={activeTab === 'report'} onClick={() => setActiveTab('report')} icon={<Share2 size={20} />} label="Compartilhar" />
@@ -323,6 +389,7 @@ export default function App() {
         
         <nav className="flex-1 p-6 flex flex-col gap-2">
           <SidebarNavBtn active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Painel Geral" />
+          <SidebarNavBtn active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<Heart size={20} />} label="Saúde do Ministério" />
           <SidebarNavBtn active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon={<Search size={20} />} label="Busca Global" />
           <SidebarNavBtn active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={<Users size={20} />} label="Corpo de Membros" />
           <SidebarNavBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<CalendarIcon size={20} />} label="Calendário Mensal" />
@@ -352,12 +419,22 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-                <div className="lg:col-span-3">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Próxima Escala Confirmada
-                  </h3>
-                  <NextScaleInfo db={db} onNavigate={() => setActiveTab('calendar')} />
+                <div className="lg:col-span-3 space-y-8">
+                  <section>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Próxima Escala Confirmada
+                    </h3>
+                    <NextScaleInfo db={db} onNavigate={() => setActiveTab('calendar')} />
+                  </section>
+
+                  <section>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
+                      <LayoutDashboard size={14} className="text-emerald-500" />
+                      Ranking de Engajamento
+                    </h3>
+                    <EngagementDashboard db={db} />
+                  </section>
                 </div>
                 <div className="lg:col-span-2">
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6">Membros Sugeridos</h3>
@@ -369,6 +446,13 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'health' && (
+            <motion.div key="health" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="max-w-6xl mx-auto">
+              <Header title="Saúde do Ministério" subtitle="Analise o engajamento, detecte sobrecargas e cuide do seu time." />
+              <MinistryHealthDashboard db={db} />
             </motion.div>
           )}
 
@@ -610,7 +694,7 @@ export default function App() {
             </div>
           </div>
           <div className="space-y-3">
-             <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Janela de Disponibilidade</label>
+             <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Janela de Disponibilidade Fixa</label>
              <div className="flex flex-wrap gap-2">
                {DAYS_SHORT.map((day, i) => (
                  <label key={day} className="cursor-pointer group">
@@ -621,9 +705,57 @@ export default function App() {
                  </label>
                ))}
              </div>
-             <p className="text-[10px] text-gray-400 font-medium leading-relaxed italic">A ausência de seleção implica que o membro está disponível para todos os dias da semana (Full Stack).</p>
+             <p className="text-[10px] text-gray-400 font-medium leading-relaxed italic">Dica: Se não marcar nada, entende-se disponibilidade total.</p>
           </div>
-          {editingMember && <MemberStats member={editingMember} scales={db.scales} />}
+
+          <div className="space-y-4">
+             <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Restrições de Data (Exceções)</label>
+             <div className="flex gap-2">
+               <input 
+                 type="date" 
+                 id="unavailable-date-picker"
+                 className="flex-1 px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl text-xs font-bold outline-none focus:border-emerald-500" 
+               />
+               <button 
+                 type="button"
+                 onClick={() => {
+                    const input = document.getElementById('unavailable-date-picker') as HTMLInputElement;
+                    if (input.value && !editingMember?.unavailableDates?.includes(input.value)) {
+                      const newDates = [...(editingMember?.unavailableDates || []), input.value].sort();
+                      setEditingMember(prev => prev ? { ...prev, unavailableDates: newDates } : null);
+                      input.value = '';
+                    }
+                 }}
+                 className="p-3 bg-[#1a1a2e] text-white rounded-xl hover:bg-slate-800 transition shadow-lg"
+               >
+                 <Plus size={18} />
+               </button>
+             </div>
+             
+             <div className="flex flex-wrap gap-2">
+                {editingMember?.unavailableDates?.map(date => (
+                  <div key={date} className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 rounded-xl text-[10px] font-black border border-red-100 animate-in fade-in zoom-in-95">
+                    {format(parse(date, 'yyyy-MM-dd', new Date()), "dd/MM/yy")}
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setEditingMember(prev => prev ? { 
+                          ...prev, 
+                          unavailableDates: prev.unavailableDates?.filter(d => d !== date) 
+                        } : null);
+                      }}
+                      className="hover:scale-125 transition"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                {(!editingMember?.unavailableDates || editingMember.unavailableDates.length === 0) && (
+                  <p className="text-[10px] text-gray-400 italic">Nenhum impedimento específico agendado.</p>
+                )}
+             </div>
+          </div>
+          {/* {editingMember && <MemberStats member={editingMember} scales={db.scales} />} */}
           <div className="flex gap-3 pt-4">
              <button type="button" onClick={() => setIsMemberModalOpen(false)} className="flex-1 py-3 text-xs font-bold text-gray-500 hover:bg-gray-100 rounded-2xl transition">Cancelar</button>
              <button type="submit" className="flex-[2] py-4 bg-[#1a1a2e] text-white rounded-2xl text-sm font-black shadow-xl hover:bg-[#252541] transition active:scale-95">Concluir Cadastro</button>
@@ -826,27 +958,70 @@ function Modal({ isOpen, onClose, title, children, wide }: any) {
   );
 }
 
-function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwap, onUndoSwap, suggestMembers }: any) {
+function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwap, onUndoSwap, suggestMembers, dbScales }: any) {
   const [eventName, setEventName] = useState(scale?.event || 'Culto');
   const [qty, setQty] = useState(scale?.members.length || 4);
   const [mode, setMode] = useState<'auto' | 'manual'>(scale ? 'manual' : 'auto');
   const [manualSelection, setManualSelection] = useState<string[]>(scale?.members || []);
   const [autoSuggestion, setAutoSuggestion] = useState<Member[]>([]);
+  const [serviceType, setServiceType] = useState<ServiceType>(scale?.serviceType || 'evening');
+  const [isAiLoading, setIsAiLoading] = useState(false);
 
   useEffect(() => {
     if (selectedDate && mode === 'auto') setAutoSuggestion(suggestMembers(selectedDate, qty));
   }, [selectedDate, qty, mode]);
+
+  const handleAISuggest = async () => {
+    if (!selectedDate) return;
+    setIsAiLoading(true);
+    try {
+      const db: AppDB = { 
+        members, 
+        scales: dbScales, 
+        settings: { church: '', ministry: '', leader: '' } // Settings don't matter much for basic suggestions
+      };
+      const suggestedIds = await getAISmartSuggestion(db, selectedDate, serviceType, qty);
+      setManualSelection(suggestedIds);
+      setMode('manual');
+    } catch (err) {
+      console.error(err);
+      // Fallback to local suggestion if AI fails
+      const suggestedIds = suggestMembers(selectedDate, qty, true).map(m => m.id);
+      setManualSelection(suggestedIds);
+      setMode('manual');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   const currentIds = mode === 'auto' ? autoSuggestion.map(m => m.id) : manualSelection;
   const dow = selectedDate ? getDay(parse(selectedDate, 'yyyy-MM-dd', new Date())) : -1;
 
   return (
     <div className="flex flex-col gap-10">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <div className="space-y-2">
-             <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Título da Atividade</label>
-             <input value={eventName} onChange={e => setEventName(e.target.value)} className="w-full px-5 py-3.5 bg-gray-50 border border-gray-100 rounded-2xl font-bold focus:ring-4 focus:ring-emerald-500/5 focus:border-emerald-500 outline-none" placeholder="Ex: Culto de Celebração" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="space-y-6 md:col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+               <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tipo de Serviço</label>
+               <select 
+                 value={serviceType} 
+                 onChange={e => {
+                   const val = e.target.value as ServiceType;
+                   setServiceType(val);
+                   setEventName(SERVICE_LABELS[val]);
+                 }} 
+                 className="w-full px-5 py-3.5 bg-gray-50 border border-gray-100 rounded-2xl font-bold focus:ring-4 focus:ring-emerald-500/5 focus:border-emerald-500 outline-none appearance-none"
+               >
+                 {(Object.keys(SERVICE_LABELS) as ServiceType[]).map(key => (
+                   <option key={key} value={key}>{SERVICE_LABELS[key]}</option>
+                 ))}
+               </select>
+            </div>
+            <div className="space-y-2">
+               <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Título Personalizado</label>
+               <input value={eventName} onChange={e => setEventName(e.target.value)} className="w-full px-5 py-3.5 bg-gray-50 border border-gray-100 rounded-2xl font-bold focus:ring-4 focus:ring-emerald-500/5 focus:border-emerald-500 outline-none" placeholder="Ex: Culto de Celebração" />
+            </div>
           </div>
           <div className="space-y-4">
              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Configuração de Vagas</label>
@@ -863,10 +1038,10 @@ function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwa
 
         <div className="flex flex-col gap-4">
            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Método de Seleção</label>
-           <div className="flex bg-gray-100 p-1.5 rounded-3xl">
+           <div className="flex bg-gray-100 p-1.5 rounded-3xl h-full pb-3">
              <button onClick={() => setMode('auto')} className={cn("flex-1 flex flex-col items-center py-4 rounded-2xl transition-all", mode === 'auto' ? "bg-white text-emerald-600 shadow-xl" : "text-gray-400 hover:text-gray-600")}>
                <RefreshCw size={24} className="mb-2" />
-               <span className="text-xs font-black">Inteligente</span>
+               <span className="text-xs font-black">Algoritmo</span>
              </button>
              <button onClick={() => setMode('manual')} className={cn("flex-1 flex flex-col items-center py-4 rounded-2xl transition-all", mode === 'manual' ? "bg-white text-emerald-600 shadow-xl" : "text-gray-400 hover:text-gray-600")}>
                <UserPlus size={24} className="mb-2" />
@@ -890,24 +1065,56 @@ function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwa
                 </div>
              ))}
              {autoSuggestion.length === 0 && <div className="sm:col-span-2 py-10 text-center text-gray-400 font-bold">Nenhum membro disponível para sorteio automático.</div>}
-             <button onClick={() => setAutoSuggestion(suggestMembers(selectedDate!, qty, true))} className="sm:col-span-2 py-4 bg-white border-2 border-dashed border-emerald-100 rounded-3xl text-emerald-600 font-black text-xs hover:bg-emerald-50 transition-all flex items-center justify-center gap-3 active:scale-[0.98]">
-               <RefreshCw size={16} /> Embaralhar Novos Candidatos
-             </button>
+             <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+               <button 
+                onClick={handleAISuggest} 
+                disabled={isAiLoading || !ai}
+                className={cn(
+                  "py-4 bg-emerald-600 text-white rounded-3xl text-xs font-black transition-all flex items-center justify-center gap-3 active:scale-[0.98] shadow-lg shadow-emerald-900/20",
+                  (!ai || isAiLoading) && "opacity-50 cursor-not-allowed"
+                )}
+               >
+                 {isAiLoading ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                 Sugerir com IA Smart
+               </button>
+               <button onClick={() => setAutoSuggestion(suggestMembers(selectedDate!, qty, true))} className="py-4 bg-white border-2 border-dashed border-emerald-100 rounded-3xl text-emerald-600 font-black text-xs hover:bg-emerald-50 transition-all flex items-center justify-center gap-3 active:scale-[0.98]">
+                 <RefreshCw size={16} /> Embaralhar Novos Candidatos
+               </button>
+             </div>
            </div>
          ) : (
            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
              {members.sort((a:any,b:any) => a.name.localeCompare(b.name)).map((m:any) => {
-               const a = m.availableDays.length === 0 || m.availableDays.includes(dow);
-               const s = manualSelection.includes(m.id);
+               const isDayOk = m.availableDays.length === 0 || m.availableDays.includes(dow);
+               const isDateRestricted = m.unavailableDates?.includes(selectedDate!);
+               const isAvailable = isDayOk && !isDateRestricted;
+               const isSelected = manualSelection.includes(m.id);
+               
                return (
-                 <div key={m.id} onClick={() => a && setManualSelection(p => p.includes(m.id) ? p.filter(x => x !== m.id) : [...p, m.id])} className={cn("p-4 rounded-3xl border-2 flex items-center justify-between transition-all active:scale-95", !a ? "opacity-30 border-gray-50 cursor-not-allowed" : s ? "bg-emerald-50 border-emerald-500 shadow-md ring-4 ring-emerald-500/10" : "bg-white border-gray-50 group hover:border-emerald-100 cursor-pointer")}>
+                 <div 
+                   key={m.id} 
+                   onClick={() => {
+                     if (!isAvailable) return;
+                     setManualSelection(p => p.includes(m.id) ? p.filter(x => x !== m.id) : [...p, m.id]);
+                   }} 
+                   className={cn(
+                     "p-4 rounded-3xl border-2 flex items-center justify-between transition-all relative overflow-hidden",
+                     !isAvailable ? "opacity-30 border-gray-100 bg-gray-50/50 cursor-not-allowed grayscale pointer-events-none" : 
+                     isSelected ? "bg-emerald-50 border-emerald-500 shadow-md ring-4 ring-emerald-500/10 active:scale-95 cursor-pointer" : 
+                     "bg-white border-gray-50 group hover:border-emerald-100 active:scale-95 cursor-pointer"
+                   )}
+                 >
                     <div className="flex items-center gap-4">
-                       <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center transition-colors shadow-sm", s ? "bg-emerald-500 text-white" : "bg-gray-100 text-transparent")}>
+                       <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center transition-colors shadow-sm", isSelected ? "bg-emerald-500 text-white" : "bg-gray-100 text-transparent")}>
                          <Check size={14} strokeWidth={4} />
                        </div>
-                       <p className="text-sm font-black text-gray-900">{m.name}</p>
+                       <div>
+                         <p className={cn("text-sm font-black", !isAvailable ? "text-slate-400" : "text-gray-900")}>{m.name}</p>
+                         {isDateRestricted && <span className="text-[9px] font-black text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 uppercase tracking-tighter">DATA BLOQUEADA</span>}
+                         {!isDayOk && !isDateRestricted && <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-tighter">INDISPONÍVEL NESTE DIA</span>}
+                       </div>
                     </div>
-                    {!a && <AlertTriangle size={18} className="text-red-400" />}
+                    {!isAvailable && <X size={16} className="text-red-400 opacity-50" />}
                  </div>
                );
              })}
@@ -939,7 +1146,7 @@ function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwa
              <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Substituir por</label>
                 <select name="inId" className="w-full px-5 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none">
-                  {members.filter((m:any) => !scale.members.includes(m.id) && (m.availableDays.length === 0 || m.availableDays.includes(dow))).map((m:any) => <option key={m.id} value={m.id} className="text-black">{m.name}</option>)}
+                  {members.filter((m:any) => !scale.members.includes(m.id) && isMemberAvailable(m, selectedDate!)).map((m:any) => <option key={m.id} value={m.id} className="text-black">{m.name}</option>)}
                 </select>
              </div>
              <button type="submit" className="sm:col-span-2 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/50 flex items-center justify-center gap-3 active:scale-95 px-6 leading-tight">
@@ -990,7 +1197,7 @@ function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwa
             <Trash2 size={18} />
           </button>
         )}
-        <button onClick={() => onSave(currentIds, eventName)} className="flex-1 py-3 bg-[#1a1a2e] text-white rounded-xl text-xs font-black shadow-lg hover:bg-slate-900 transition-all active:scale-[0.98]">
+        <button onClick={() => onSave(currentIds, eventName, serviceType)} className="flex-1 py-3 bg-[#1a1a2e] text-white rounded-xl text-xs font-black shadow-lg hover:bg-slate-900 transition-all active:scale-[0.98]">
           Garantir Escala Final
         </button>
       </div>
@@ -1116,10 +1323,29 @@ function SettingsPanel({ db, setDb, showToast }: any) {
 }
 
 function NextScaleInfo({ db, onNavigate }: any) {
+  const [isCopied, setIsCopied] = useState(false);
+
   const ns = useMemo(() => {
     const t = format(new Date(), 'yyyy-MM-dd');
     return db.scales.filter((s:any)=>s.date >= t).sort((a:any,b:any)=>a.date.localeCompare(b.date))[0];
   }, [db.scales]);
+
+  const shareText = useMemo(() => {
+    if (!ns) return '';
+    const mbs = ns.members.map(id => db.members.find(m => m.id === id)?.name).filter(Boolean);
+    const dateStr = format(parse(ns.date, 'yyyy-MM-dd', new Date()), "eeee, dd/MM", { locale: ptBR });
+    return `🕊️ *${db.settings.ministry.toUpperCase()}*\n📋 *${ns.event.toUpperCase()}*\n📅 ${dateStr}\n\n*EQUIPE ESCALADA:*\n${mbs.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\n_Contamos com sua presença! 🙏_`;
+  }, [ns, db.members, db.settings.ministry]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(shareText);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const handleWhatsApp = () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank');
+  };
 
   if (!ns) return (
     <div className="flex flex-col items-center justify-center p-10 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-100">
@@ -1149,48 +1375,262 @@ function NextScaleInfo({ db, onNavigate }: any) {
             ) : null;
           })}
        </div>
-       <button onClick={onNavigate} className="w-full py-4 border-2 border-slate-100 border-dashed rounded-3xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:border-emerald-200 hover:text-emerald-500 hover:bg-emerald-50/50 transition-all">Ajustar Escala no Calendário</button>
+        <div className="flex gap-2">
+          <button onClick={handleWhatsApp} className="flex-1 py-4 bg-emerald-600 text-white rounded-[2rem] text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/40 flex items-center justify-center gap-2 active:scale-95 leading-none">
+            <MessageCircle size={16} /> WhatsApp
+          </button>
+          <button onClick={handleCopy} className={cn("flex-1 py-4 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition shadow-lg flex items-center justify-center gap-2 active:scale-95 leading-none", isCopied ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-white text-slate-900 shadow-slate-200 border-slate-100")}>
+            {isCopied ? <><Check size={16} /> Copiado</> : <><Copy size={16} /> Copiar</>}
+          </button>
+        </div>
+        <button onClick={onNavigate} className="w-full py-4 border-2 border-slate-100 border-dashed rounded-3xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:border-emerald-200 hover:text-emerald-500 hover:bg-emerald-50/50 transition-all">Ajustar Escala no Calendário</button>
     </div>
   );
 }
 
-function MemberStats({ member, scales }: { member: Member, scales: Scale[] }) {
-  const [selectedMonth, setSelectedMonth] = useState(new Date());
-  
-  const monthScales = useMemo(() => {
-    return scales.filter(s => {
-      const scaleDate = parse(s.date, 'yyyy-MM-dd', new Date());
-      return isSameMonth(scaleDate, selectedMonth) && s.members.includes(member.id);
-    });
-  }, [selectedMonth, scales, member.id]);
 
-  const count = monthScales.length;
-  
-  let rating = { label: 'Ruim', color: 'text-red-500', bg: 'bg-red-50' };
-  if (count >= 4) rating = { label: 'Ótima', color: 'text-emerald-600', bg: 'bg-emerald-50' };
-  else if (count === 3) rating = { label: 'Boa', color: 'text-blue-600', bg: 'bg-blue-50' };
-  else if (count === 2) rating = { label: 'Regular', color: 'text-amber-600', bg: 'bg-amber-50' };
+function MinistryHealthDashboard({ db }: { db: AppDB }) {
+  const stats = useMemo(() => {
+    const totalMembers = db.members.length;
+    const totalScales = db.scales.length;
+    
+    // Member engagement data
+    const memberEngagement = db.members.map(m => {
+      const counts = db.scales.filter(s => s.members.includes(m.id)).length;
+      const lastScale = db.scales
+        .filter(s => s.members.includes(m.id))
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      
+      const lastDate = lastScale ? parse(lastScale.date, 'yyyy-MM-dd', new Date()) : null;
+      const daysSinceLast = lastDate ? differenceInDays(new Date(), lastDate) : 999;
+      
+      return { 
+        name: m.name, 
+        count: counts, 
+        daysSinceLast,
+        isInactive: daysSinceLast > 60 && totalScales > 5,
+        isBurnout: counts > 8 && totalScales > 10 // Arbitrary logic for demo
+      };
+    }).sort((a, b) => b.count - a.count);
+
+    // Timeline data (last 6 months)
+    const months = Array.from({ length: 6 }).map((_, i) => {
+        const d = subMonths(new Date(), i);
+        return format(d, 'MMM/yy', { locale: ptBR });
+    }).reverse();
+
+    const timelineData = months.map(m => {
+        const [monthName, year] = m.split('/');
+        const count = db.scales.filter(s => {
+            const date = parse(s.date, 'yyyy-MM-dd', new Date());
+            const monthStr = format(date, 'MMM/yy', { locale: ptBR });
+            return monthStr === m;
+        }).length;
+        return { name: m, Escalas: count };
+    });
+
+    const inactiveMembers = memberEngagement.filter(m => m.isInactive);
+    const burnoutMembers = memberEngagement.filter(m => m.isBurnout);
+
+    return { totalMembers, totalScales, memberEngagement, timelineData, inactiveMembers, burnoutMembers };
+  }, [db]);
+
+  const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
   return (
-    <div className="mt-8 pt-8 border-t border-gray-100">
-      <div className="flex items-center justify-between mb-4">
-        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Resumo de Participação</label>
-        <div className="flex items-center gap-2">
-           <button type="button" onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))} className="p-1 hover:bg-gray-100 rounded-lg transition"><ChevronLeft size={14}/></button>
-           <span className="text-xs font-bold text-gray-600 w-24 text-center lowercase">{format(selectedMonth, 'MMMM yyyy', { locale: ptBR })}</span>
-           <button type="button" onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))} className="p-1 hover:bg-gray-100 rounded-lg transition"><ChevronRight size={14}/></button>
+    <div className="space-y-8 pb-10">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <DashboardStat icon={<Heart className="text-rose-500"/>} label="Saúde Geral" value={db.members.length > 0 ? "Estável" : "N/A"} trend="Status" color="emerald" />
+        <DashboardStat icon={<AlertTriangle className="text-amber-500"/>} label="Risco Inativo" value={stats.inactiveMembers.length} trend="Membros" color="amber" />
+        <DashboardStat icon={<TrendingUp className="text-blue-500"/>} label="Escalas/Mês" value={Math.round(stats.totalScales / 6) || 0} trend="Média" color="blue" />
+        <DashboardStat icon={<Users className="text-emerald-500"/>} label="Time Ativo" value={db.members.length - stats.inactiveMembers.length} trend="Voluntários" color="emerald" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <Card title="Adesão ao Ministério" icon={<TrendingUp size={16}/>}>
+           <div className="h-[300px] w-full pt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats.timelineData}>
+                  <defs>
+                    <linearGradient id="colorEscalas" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                  <RechartsTooltip 
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  />
+                  <Area type="monotone" dataKey="Escalas" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorEscalas)" />
+                </AreaChart>
+              </ResponsiveContainer>
+           </div>
+        </Card>
+
+        <Card title="Carga de Trabalho" icon={<PieChartIcon size={16}/>}>
+           <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={stats.memberEngagement.slice(0, 6)}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="count"
+                  >
+                    {stats.memberEngagement.slice(0, 6).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip />
+                  <Legend verticalAlign="bottom" height={36}/>
+                </PieChart>
+              </ResponsiveContainer>
+           </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2">
+            <Card title="Distribuição de Frequência" icon={<BarChart3 size={16}/>}>
+               <div className="h-[400px] w-full pt-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stats.memberEngagement.slice(0, 10)} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                      <XAxis type="number" hide />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 11, fontWeight: 'bold'}} width={100} />
+                      <RechartsTooltip cursor={{fill: '#f8fafc'}} />
+                      <Bar dataKey="count" fill="#10b981" radius={[0, 10, 10, 0]} barSize={20} />
+                    </BarChart>
+                  </ResponsiveContainer>
+               </div>
+            </Card>
+        </div>
+
+        <div className="space-y-6">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                <Heart size={14} className="text-rose-500" />
+                Alertas de Cuidado
+            </h3>
+            
+            {stats.inactiveMembers.length > 0 && (
+                <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100 space-y-4">
+                    <div className="flex items-center gap-2 text-amber-600 font-bold text-xs uppercase tracking-wider">
+                        <AlertTriangle size={14} /> Possível Inatividade
+                    </div>
+                    <div className="space-y-3">
+                        {stats.inactiveMembers.slice(0, 3).map(m => (
+                            <div key={m.name} className="flex justify-between items-center text-sm">
+                                <span className="font-bold text-slate-700">{m.name}</span>
+                                <span className="text-[10px] bg-white px-2 py-1 rounded-lg border border-amber-200 text-amber-600 font-black">{m.daysSinceLast} dias fora</span>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-[10px] text-amber-600/70 font-medium italic">Considere entrar em contato para saber como eles estão.</p>
+                </div>
+            )}
+
+            {stats.burnoutMembers.length > 0 && (
+                <div className="p-6 bg-rose-50 rounded-3xl border border-rose-100 space-y-4">
+                    <div className="flex items-center gap-2 text-rose-600 font-bold text-xs uppercase tracking-wider">
+                        <Heart size={14} /> Risco de Sobrecarga
+                    </div>
+                    <div className="space-y-3">
+                        {stats.burnoutMembers.slice(0, 3).map(m => (
+                            <div key={m.name} className="flex justify-between items-center text-sm">
+                                <span className="font-bold text-slate-700">{m.name}</span>
+                                <span className="text-[10px] bg-white px-2 py-1 rounded-lg border border-rose-200 text-rose-600 font-black">{m.count} escalas</span>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-[10px] text-rose-600/70 font-medium italic">Estes voluntários estão servindo muito acima da média.</p>
+                </div>
+            )}
+
+            {stats.inactiveMembers.length === 0 && stats.burnoutMembers.length === 0 && (
+                <div className="p-10 text-center bg-white rounded-3xl border-2 border-dashed border-slate-100">
+                    <Check className="mx-auto mb-4 text-emerald-500" size={32} />
+                    <p className="text-sm font-black text-slate-900">Time Saudável</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Nenhum alerta crítico detectado</p>
+                </div>
+            )}
         </div>
       </div>
-      
-      <div className={cn("p-4 rounded-2xl flex items-center justify-between transition-all", rating.bg)}>
-        <div className="flex flex-col">
-          <span className={cn("text-[10px] font-black uppercase tracking-tighter", rating.color)}>Status Mensal</span>
-          <span className={cn("text-xl font-black", rating.color)}>{rating.label}</span>
+    </div>
+  );
+}
+
+function EngagementDashboard({ db }: { db: AppDB }) {
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  
+  const rankings = useMemo(() => {
+    const monthPrefix = format(selectedMonth, 'yyyy-MM');
+    const monthScales = db.scales.filter(s => s.date.startsWith(monthPrefix));
+    
+    return db.members.map(m => {
+      const count = monthScales.filter(s => s.members.includes(m.id)).length;
+      return { ...m, count };
+    }).sort((a, b) => b.count - a.count);
+  }, [db, selectedMonth]);
+
+  const maxCount = Math.max(...rankings.map(r => r.count), 1);
+
+  return (
+    <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-8">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Visão do Mês</p>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))} className="p-2 hover:bg-slate-50 rounded-xl transition text-slate-400"><ChevronLeft size={16}/></button>
+            <span className="text-sm font-black text-slate-900 capitalize">{format(selectedMonth, 'MMMM yyyy', { locale: ptBR })}</span>
+            <button onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))} className="p-2 hover:bg-slate-50 rounded-xl transition text-slate-400"><ChevronRight size={16}/></button>
+          </div>
         </div>
-        <div className="text-right">
-           <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Atuações</span>
-           <span className="text-2xl font-black text-gray-900">{count}</span>
+        <div className="p-3 bg-emerald-50 rounded-2xl">
+          <LayoutDashboard size={24} className="text-emerald-500" />
         </div>
+      </div>
+
+      <div className="space-y-5">
+        {rankings.slice(0, 5).map((r, i) => (
+          <div key={r.id} className="space-y-2">
+            <div className="flex justify-between items-end">
+              <div className="flex items-center gap-3">
+                <span className={cn(
+                  "w-6 h-6 flex items-center justify-center rounded-lg text-[10px] font-black",
+                  i === 0 ? "bg-amber-100 text-amber-600" : 
+                  i === 1 ? "bg-slate-100 text-slate-600" : 
+                  i === 2 ? "bg-orange-100 text-orange-600" : "bg-slate-50 text-slate-400"
+                )}>
+                  {i + 1}º
+                </span>
+                <span className="text-xs font-black text-slate-700">{r.name}</span>
+              </div>
+              <span className="text-xs font-black text-slate-400">{r.count} <span className="text-[10px] uppercase">atuações</span></span>
+            </div>
+            <div className="h-2 bg-slate-50 rounded-full overflow-hidden">
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${(r.count / maxCount) * 100}%` }}
+                transition={{ duration: 1, ease: 'easeOut' }}
+                className={cn(
+                  "h-full rounded-full",
+                  i === 0 ? "bg-emerald-500" : i < 3 ? "bg-emerald-400" : "bg-slate-200"
+                )}
+              />
+            </div>
+          </div>
+        ))}
+        {rankings.length === 0 && (
+          <div className="py-10 text-center text-slate-300 font-bold text-xs">Nenhum dado de participação este mês</div>
+        )}
+        {rankings.length > 5 && (
+          <p className="text-center text-[10px] font-black text-slate-300 uppercase tracking-widest pt-4">Exibindo top 5 voluntários</p>
+        )}
       </div>
     </div>
   );
