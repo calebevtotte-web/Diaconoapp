@@ -367,12 +367,12 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-[#F8FAFC] text-[#1e293b] font-sans">
       {/* Mobile Navigation Bar */}
-      <nav className="md:hidden fixed top-0 left-0 bottom-0 w-20 bg-white border-r border-slate-200 z-[100] py-6 flex flex-col items-center gap-6 shadow-[4px_0_12px_rgba(0,0,0,0.05)]">
-        <MobileNavBtn active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label="Início" />
-        <MobileNavBtn active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<Heart size={22} />} label="Saúde" />
-        <MobileNavBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<CalendarIcon size={22} />} label="Escalas" />
-        <MobileNavBtn active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={<Users size={22} />} label="Equipe" />
-        <MobileNavBtn active={activeTab === 'report'} onClick={() => setActiveTab('report')} icon={<Share2 size={22} />} label="Compartilhar" />
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-[100] px-2 pt-3 pb-8 flex items-center justify-around shadow-[0_-8px_20px_rgba(0,0,0,0.05)]">
+        <MobileNavBtn active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Início" />
+        <MobileNavBtn active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<Heart size={20} />} label="Saúde" />
+        <MobileNavBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<CalendarIcon size={20} />} label="Escalas" />
+        <MobileNavBtn active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={<Users size={20} />} label="Equipe" />
+        <MobileNavBtn active={activeTab === 'report'} onClick={() => setActiveTab('report')} icon={<Share2 size={20} />} label="Manual" />
       </nav>
 
       {/* Desktop Sidebar */}
@@ -401,7 +401,7 @@ export default function App() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 ml-20 md:ml-72 p-4 md:p-10 transition-all">
+      <main className="flex-1 ml-0 md:ml-72 p-4 md:p-10 pb-32 md:pb-10 transition-all">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div key="dashboard" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="max-w-5xl mx-auto space-y-10">
@@ -797,9 +797,9 @@ export default function App() {
 
 function MobileNavBtn({ active, onClick, icon, label }: any) {
   return (
-    <button onClick={onClick} className={cn("flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl transition-all", active ? "text-emerald-600 bg-emerald-50 font-black" : "text-slate-400 font-bold")}>
+    <button onClick={onClick} className={cn("flex flex-col items-center gap-1 px-1 py-2 rounded-2xl transition-all flex-1", active ? "text-emerald-600 font-black" : "text-slate-400 font-bold")}>
       <span className={cn("transition-transform", active && "scale-110")}>{icon}</span>
-      <span className="text-[10px] uppercase tracking-wider text-center">{label}</span>
+      <span className="text-[9px] uppercase tracking-wider text-center">{label}</span>
     </button>
   );
 }
