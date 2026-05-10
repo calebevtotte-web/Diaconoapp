@@ -367,12 +367,12 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-[#F8FAFC] text-[#1e293b] font-sans">
       {/* Mobile Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-[100] px-2 py-1 flex items-center justify-around shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
-        <MobileNavBtn active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Início" />
-        <MobileNavBtn active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<Heart size={20} />} label="Saúde" />
-        <MobileNavBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<CalendarIcon size={20} />} label="Escalas" />
-        <MobileNavBtn active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={<Users size={20} />} label="Equipe" />
-        <MobileNavBtn active={activeTab === 'report'} onClick={() => setActiveTab('report')} icon={<Share2 size={20} />} label="Compartilhar" />
+      <nav className="md:hidden fixed top-0 left-0 bottom-0 w-20 bg-white border-r border-slate-200 z-[100] py-6 flex flex-col items-center gap-6 shadow-[4px_0_12px_rgba(0,0,0,0.05)]">
+        <MobileNavBtn active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label="Início" />
+        <MobileNavBtn active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<Heart size={22} />} label="Saúde" />
+        <MobileNavBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} icon={<CalendarIcon size={22} />} label="Escalas" />
+        <MobileNavBtn active={activeTab === 'members'} onClick={() => setActiveTab('members')} icon={<Users size={22} />} label="Equipe" />
+        <MobileNavBtn active={activeTab === 'report'} onClick={() => setActiveTab('report')} icon={<Share2 size={22} />} label="Compartilhar" />
       </nav>
 
       {/* Desktop Sidebar */}
@@ -401,7 +401,7 @@ export default function App() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 md:ml-72 p-4 md:p-10 pb-24 md:pb-10 transition-all">
+      <main className="flex-1 ml-20 md:ml-72 p-4 md:p-10 transition-all">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div key="dashboard" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="max-w-5xl mx-auto space-y-10">
@@ -797,9 +797,9 @@ export default function App() {
 
 function MobileNavBtn({ active, onClick, icon, label }: any) {
   return (
-    <button onClick={onClick} className={cn("flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all", active ? "text-emerald-600 bg-emerald-50 font-black" : "text-slate-400 font-bold")}>
+    <button onClick={onClick} className={cn("flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl transition-all", active ? "text-emerald-600 bg-emerald-50 font-black" : "text-slate-400 font-bold")}>
       <span className={cn("transition-transform", active && "scale-110")}>{icon}</span>
-      <span className="text-[9px] uppercase tracking-tighter">{label}</span>
+      <span className="text-[10px] uppercase tracking-wider text-center">{label}</span>
     </button>
   );
 }
@@ -824,10 +824,10 @@ function DashboardStat({ icon, label, value, trend, color = "emerald" }: any) {
         {icon}
       </div>
       <div>
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{label}</p>
+        <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-1">{label}</p>
         <div className="flex items-end gap-2">
           <p className="text-3xl md:text-4xl font-black text-slate-900 tabular-nums">{value}</p>
-          <span className="text-[9px] font-bold text-slate-300 uppercase mb-1.5">{trend}</span>
+          <span className="text-[10px] font-bold text-slate-300 uppercase mb-1.5">{trend}</span>
         </div>
       </div>
     </div>
@@ -841,8 +841,8 @@ function CompactMemberCard({ member }: any) {
         {member.name.charAt(0)}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-black text-slate-900 truncate">{member.name}</p>
-        <p className="text-[10px] font-bold text-slate-400 uppercase">Prioritário</p>
+        <p className="text-sm font-black text-slate-900 leading-tight">{member.name}</p>
+        <p className="text-xs font-bold text-slate-400 uppercase">Prioritário</p>
       </div>
       <Star size={14} className="fill-amber-400 text-amber-400" />
     </div>
@@ -868,7 +868,7 @@ function Card({ title, children, icon, className, p0 = false }: any) {
       {title && (
         <div className="flex items-center gap-2 mb-6">
           <span className="text-emerald-600">{icon}</span>
-          <h3 className="text-xs font-black uppercase tracking-widest text-gray-700">{title}</h3>
+          <h3 className="text-sm font-black uppercase tracking-widest text-gray-700">{title}</h3>
         </div>
       )}
       {children}
@@ -878,32 +878,32 @@ function Card({ title, children, icon, className, p0 = false }: any) {
 
 function MemberListItem({ member, lastScale, totalScales, onEdit, onDelete, onToggleFlag, showActions = true, hideMeta = false }: any) {
   return (
-    <div className="bg-white p-4 rounded-3xl border border-slate-100 flex items-center gap-4 transition hover:border-emerald-200 group">
-      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-lg flex-shrink-0 shadow-sm transition-transform group-hover:scale-105", member.flagged ? "bg-amber-500" : "bg-slate-800")}>
+    <div className="bg-white p-4 sm:p-5 rounded-[2rem] border border-slate-100 flex items-center gap-3 sm:gap-5 transition hover:border-emerald-200 group shadow-sm overflow-hidden">
+      <div className={cn("w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white font-black text-lg sm:text-xl flex-shrink-0 shadow-sm transition-transform group-hover:scale-105", member.flagged ? "bg-amber-500" : "bg-slate-800")}>
         {member.name.charAt(0).toUpperCase()}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <h4 className="font-bold text-sm truncate text-slate-900">{member.name}</h4>
-          {member.flagged && <Star size={12} className="fill-amber-400 text-amber-400" />}
+        <div className="flex items-center gap-2 min-w-0">
+          <h4 className="font-bold text-sm sm:text-base text-slate-900 leading-tight truncate">{member.name}</h4>
+          {member.flagged && <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />}
         </div>
         {!hideMeta && (
-          <div className="flex items-center gap-3">
-             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{totalScales || 0} Atividades</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+             <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-tight whitespace-nowrap">{totalScales || 0} Ativ.</span>
              {lastScale && (
-               <>
-                 <div className="w-1 h-1 rounded-full bg-slate-200" />
-                 <span className="text-[10px] font-bold text-emerald-600/70 uppercase tracking-tight">Visto {format(parse(lastScale, 'yyyy-MM-dd', new Date()), "dd/MM")}</span>
-               </>
+               <div className="flex items-center gap-1.5 sm:gap-2">
+                 <div className="hidden sm:block w-1 h-1 rounded-full bg-slate-200" />
+                 <span className="text-[10px] sm:text-[11px] font-bold text-emerald-600/70 uppercase tracking-tight whitespace-nowrap">Visto {format(parse(lastScale, 'yyyy-MM-dd', new Date()), "dd/MM")}</span>
+               </div>
              )}
           </div>
         )}
       </div>
       {showActions && (
-        <div className="flex items-center gap-1">
-          <button onClick={onToggleFlag} className={cn("p-2 rounded-xl transition", member.flagged ? "text-amber-500 bg-amber-50" : "text-slate-300 hover:bg-slate-50")}><Star size={18} fill={member.flagged ? "currentColor" : "none"} /></button>
-          <button onClick={onEdit} className="p-2 text-slate-400 hover:bg-slate-50 rounded-xl transition"><MoreHorizontal size={18} /></button>
-          <button onClick={onDelete} className="p-2 text-red-400 hover:bg-red-50 rounded-xl transition"><Trash2 size={18} /></button>
+        <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+          <button onClick={onToggleFlag} className={cn("p-1.5 sm:p-2 rounded-xl transition", member.flagged ? "text-amber-500 bg-amber-50" : "text-slate-300 hover:bg-slate-50")}><Star size={16} fill={member.flagged ? "currentColor" : "none"} /></button>
+          <button onClick={onEdit} className="p-1.5 sm:p-2 text-slate-400 hover:bg-slate-50 rounded-xl transition"><MoreHorizontal size={16} /></button>
+          <button onClick={onDelete} className="p-1.5 sm:p-2 text-red-100 hover:bg-red-50 text-red-500 rounded-xl transition"><Trash2 size={16} /></button>
         </div>
       )}
     </div>
@@ -1059,7 +1059,7 @@ function DayScaleManager({ selectedDate, scale, members, onSave, onDelete, onSwa
                 <div key={m.id} className="flex items-center gap-4 p-4 bg-emerald-50/50 border border-emerald-100 rounded-3xl transition animate-in fade-in slide-in-from-bottom-2">
                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-lg shadow-emerald-900/10 text-sm">#{i+1}</div>
                    <div>
-                     <p className="text-sm font-black text-emerald-900 truncate">{m.name}</p>
+                     <p className="text-sm font-black text-emerald-900 leading-tight">{m.name}</p>
                      <p className="text-[10px] font-bold text-emerald-600/60 uppercase">ÓTIMA ADERÊNCIA</p>
                    </div>
                 </div>
@@ -1370,7 +1370,7 @@ function NextScaleInfo({ db, onNavigate }: any) {
             return m ? (
               <div key={id} className="p-3 bg-white rounded-2xl flex items-center gap-3 border border-slate-100 shadow-sm transition animate-in fade-in zoom-in-95">
                  <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-[#0F172A] font-black text-xs border border-slate-100">{m.name.charAt(0)}</div>
-                 <span className="text-sm font-black text-slate-700 truncate">{m.name}</span>
+                 <span className="text-sm font-black text-slate-700 leading-tight">{m.name}</span>
               </div>
             ) : null;
           })}
@@ -1512,7 +1512,7 @@ function MinistryHealthDashboard({ db }: { db: AppDB }) {
         </div>
 
         <div className="space-y-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                 <Heart size={14} className="text-rose-500" />
                 Alertas de Cuidado
             </h3>
@@ -1526,11 +1526,11 @@ function MinistryHealthDashboard({ db }: { db: AppDB }) {
                         {stats.inactiveMembers.slice(0, 3).map(m => (
                             <div key={m.name} className="flex justify-between items-center text-sm">
                                 <span className="font-bold text-slate-700">{m.name}</span>
-                                <span className="text-[10px] bg-white px-2 py-1 rounded-lg border border-amber-200 text-amber-600 font-black">{m.daysSinceLast} dias fora</span>
+                                <span className="text-xs bg-white px-2 py-1 rounded-lg border border-amber-200 text-amber-600 font-black">{m.daysSinceLast} dias fora</span>
                             </div>
                         ))}
                     </div>
-                    <p className="text-[10px] text-amber-600/70 font-medium italic">Considere entrar em contato para saber como eles estão.</p>
+                    <p className="text-xs text-amber-600/70 font-medium italic">Considere entrar em contato para saber como eles estão.</p>
                 </div>
             )}
 
@@ -1543,11 +1543,11 @@ function MinistryHealthDashboard({ db }: { db: AppDB }) {
                         {stats.burnoutMembers.slice(0, 3).map(m => (
                             <div key={m.name} className="flex justify-between items-center text-sm">
                                 <span className="font-bold text-slate-700">{m.name}</span>
-                                <span className="text-[10px] bg-white px-2 py-1 rounded-lg border border-rose-200 text-rose-600 font-black">{m.count} escalas</span>
+                                <span className="text-xs bg-white px-2 py-1 rounded-lg border border-rose-200 text-rose-600 font-black">{m.count} escalas</span>
                             </div>
                         ))}
                     </div>
-                    <p className="text-[10px] text-rose-600/70 font-medium italic">Estes voluntários estão servindo muito acima da média.</p>
+                    <p className="text-xs text-rose-600/70 font-medium italic">Estes voluntários estão servindo muito acima da média.</p>
                 </div>
             )}
 
@@ -1583,7 +1583,7 @@ function EngagementDashboard({ db }: { db: AppDB }) {
     <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-8">
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Visão do Mês</p>
+          <p className="text-xs font-black uppercase tracking-widest text-slate-400">Visão do Mês</p>
           <div className="flex items-center gap-3">
             <button onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))} className="p-2 hover:bg-slate-50 rounded-xl transition text-slate-400"><ChevronLeft size={16}/></button>
             <span className="text-sm font-black text-slate-900 capitalize">{format(selectedMonth, 'MMMM yyyy', { locale: ptBR })}</span>
@@ -1610,7 +1610,7 @@ function EngagementDashboard({ db }: { db: AppDB }) {
                 </span>
                 <span className="text-xs font-black text-slate-700">{r.name}</span>
               </div>
-              <span className="text-xs font-black text-slate-400">{r.count} <span className="text-[10px] uppercase">atuações</span></span>
+              <span className="text-xs font-black text-slate-400">{r.count} <span className="text-xs uppercase">atuações</span></span>
             </div>
             <div className="h-2 bg-slate-50 rounded-full overflow-hidden">
               <motion.div 
